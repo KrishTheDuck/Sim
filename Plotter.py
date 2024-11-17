@@ -2,11 +2,8 @@ import astropy.time
 import astropy.units as u
 import hapsira.frames
 import numpy as np
-from astropy.time import Time, TimeDelta
+from astropy.time import TimeDelta, Time
 from hapsira.bodies import Earth
-from hapsira.core.maneuver import (
-    bielliptic,
-)
 from hapsira.maneuver import Maneuver
 from hapsira.plotting import OrbitPlotter
 from hapsira.twobody import Orbit
@@ -18,10 +15,24 @@ from Mechanics import Mechanics
 
 
 class Plotter:
-    rand_colors = ['red', 'green', 'blue', 'yellow', 'orange', 'violet']
+    colors = ["deepskyblue", "darkorange", "mediumseagreen", "gold", "blue", "green", "darkred", "cyan"]
 
-    def __init__(self):
-        pass
+    def __init__(self, body, location, start_epoch, stop_epoch, delta):
+        self.body = body
+        self.location = location
+        self.s = JPLQuery(self.body, self.location, {
+            'start': start_epoch.strftime("%Y-%m-%d 00:00:00"),
+            'stop': stop_epoch.strftime("%Y-%m-%d 00:00:00"),
+            'step': '1d'
+        })
+        self.vals = self.s.zoom_to_closest_approach()
+        self.hor = self.s.get_ephem(attractor=Earth,
+                                    epoch=time_range(start=self.vals['date'] - delta,
+                                                     end=self.vals['date'] + delta))
+
+        self.ephemerides = self.s.get_orbital_elements(
+            epochs_time_range=time_range(start=self.vals['date'] - 0.5 * u.day,
+                                         end=self.vals['date'] + 0.5 * u.day), EPOCH=self.vals['date'])
 
     @staticmethod
     def generate_orbit(ephemerides: dict, EPOCH: astropy.time.Time, r_min: float, r_max: float,
@@ -33,7 +44,7 @@ class Plotter:
             attractor=Earth,
             plane=plane,
             epoch=EPOCH,
-            a=a * u.km,
+            a=a * u.m,
             ecc=ecc * u.one,
             inc=ephemerides['inc'] * (np.pi / 180.0) * u.rad,
             raan=ephemerides['raan'] * (np.pi / 180.0) * u.rad,
@@ -41,93 +52,104 @@ class Plotter:
             nu=true_anomaly * u.rad
         )
 
-    @staticmethod
-    def plot_timed(body, start_time, end_time, delta, r1=100 * 1000.0 + Earth.R.value / 1000.0, show=False):
-        # Get the JPLQuery object located at the earth, starting from the initial query times given.
-        s = JPLQuery(body, "500@399", {'start': start_time, 'stop': end_time, 'step': '1d'})
-        # Zoom in to the closest approach and let the epochs
-        vals = s.zoom_to_closest_approach()
+    def animate_timed(self, r1=100 * 1000.0 + Earth.R.to_value(u.km), plot=False):
+        maneuvers = []
+        orbits = []
 
-        hor = s.get_ephem(attractor=Earth,
-                          epoch=time_range(start=vals['date'] - delta,
-                                           end=vals['date'] + delta))
-
-        ephemerides = s.get_orbital_elements(
-            epochs_time_range=time_range(start=vals['date'] - delta,
-                                         end=vals['date'] + delta),
-            EPOCH=vals['date'])
-
-        # Precalculate the initial orbit
-        r_max = (vals['dist'] * u.km).to(u.m).value
+        # Region Precalculate the initial orbit
+        r_max = (self.vals['dist'] * u.km).to(u.m).value
         r_min = (r1 * u.km).to(u.m).value
         a = (r_min + r_max) / 2.0
         e = (r_max - r_min) / (r_min + r_max)
 
         dv = abs(Mechanics.vel(r_min, r_min) - Mechanics.vel(a, r_min))
         dt = TimeDelta(Mechanics.elliptical_period(a, e, r_min, r_max) * u.s)
+        # End
+        # Region: first transfer from MEO to asteroid
+        initial_orbit = Plotter.generate_orbit(self.ephemerides, self.vals['date'] - dt,
+                                               r_min, r_min, self.hor.plane, 0)
+        v = initial_orbit.v.to(u.m / u.s)
 
-        # first transfer from MEO to asteroid
-        initial_orbit = Plotter.generate_orbit(ephemerides, vals['date'] - dt, r1, r1,
-                                               hor.plane, 0)
-        r, v = initial_orbit.rv()
-        v = v.to(u.m / u.s)
-        r = r.to(u.m)
+        man = Maneuver((0 * u.s, ((dv * v / norm(v)).value * (u.m / u.s))))
+        maneuvers.append(man)
 
-        rendezvous_orbit = initial_orbit.apply_maneuver(
-            Maneuver((0 * u.s, ((dv * v / norm(v)).value * (u.m / u.s))))
-        ).propagate(dt)
+        rendezvous_orbit = initial_orbit.apply_maneuver(man).propagate(dt)
 
-        # Calculate dynamics of the return orbit
-        dv = abs(Mechanics.vel(r_min, r_min) - Mechanics.vel(a, r_max))
+        # End
+        # Region: Calculate dynamics of the return orbit
+        dv = Mechanics.vel(r_min, r_min) - Mechanics.vel(a, r_max)
 
-        return_orbit = rendezvous_orbit.apply_maneuver(
-            Maneuver((0 * u.s, ((dv * r / norm(r)).value * (u.m / u.s))))
+        man = Maneuver((0 * u.s, (Mechanics.vec_in_dir(-dv, initial_orbit.r.to(u.m)) * (u.m / u.s))))
+        maneuvers.append(
+            Maneuver(
+                (dt.to(u.s), (Mechanics.vec_in_dir(-dv, initial_orbit.r.to(u.m)) * (u.m / u.s)))
+            )
         )
 
-        return_time = return_orbit.time_to_anomaly(return_orbit.nu + np.pi * u.rad)
+        return_orbit = (rendezvous_orbit.apply_maneuver(man))
+        return_time = return_orbit.time_to_anomaly(np.pi * u.rad + return_orbit.nu)
         return_orbit = return_orbit.propagate(return_time)
 
-        # calculate adjustment orbit by computing a bi-elliptic transfer to a lower orbit.
-        adjustment_orbit = []
+        # End
+        # Region: double adjustment
+        # Orbital velocities
+        v_return = return_orbit.v.to(u.m / u.s)
 
-        rv = return_orbit.rv()
-        rv = (rv[0].to_value(u.m), rv[-1].to_value(u.m / u.s))
+        # Velocity difference vector
+        delta_v_vector = v_return - v
+        delta_v_magnitude = norm(delta_v_vector).value
 
-        # first orbit arbitrarily can be 20 percent bigger than initial
-        dv_a, dv_b, dv_c, t_trans1, t_trans2 = bielliptic(Earth.k.value, r_min * 1.2, r_min, rv)
+        # Normalize delta-v for thrust direction
+        thrust_direction = delta_v_vector / delta_v_magnitude
 
-        man1 = Maneuver(
-            (0 * u.s, (dv_a * u.m / u.s).decompose())
+        # Scale thrust and construct maneuver
+        maneuvers.append(
+            Maneuver(
+                (return_time, -thrust_direction * delta_v_magnitude)
+            )
         )
 
-        adjustment_orbit.append(return_orbit.apply_maneuver(man1).propagate(t_trans1 * u.s + t_trans2 * u.s))
+        # End
+        man_l = []
+        # Coalesce the maneuvers
+        for man in maneuvers:
+            pair = man[:]
+            for m in pair:
+                man_l.append(
+                    (m[0], m[1])
+                )
+        total_maneuvers = Maneuver(*tuple(man_l))
+        complete = initial_orbit.apply_maneuver(total_maneuvers, intermediate=True)
 
-        # second little transfer
-        adjustment_orbit.append(adjustment_orbit[-1].apply_maneuver(
-            Maneuver.hohmann(adjustment_orbit[-1], r_min * u.m)
-        ))
+        if plot:
+            f2 = OrbitPlotter()
+            f2.set_body_frame(Earth)
 
-        if show:
-            frame = OrbitPlotter()
-            frame.set_body_frame(Earth)
+            for i, orbit in enumerate(complete):
+                f2.plot(orbit, label=f"orbit {i}", color=Plotter.colors[i])
 
-            frame.plot(initial_orbit, label="Initial Orbit", color="deepskyblue")
-            frame.plot(rendezvous_orbit, label="Rendezvous Orbit", color="darkorange")
-            frame.plot(return_orbit, label="Return Orbit", color="mediumseagreen")
-            frame.plot(adjustment_orbit[0], label="Adjustment Orbit", color="gold")
-            frame.plot(adjustment_orbit[1], label="Adjustment Orbit", color="gold")
+            f2.plot_ephem(self.hor,
+                          epoch=self.vals['date'], label=self.body,
+                          color='red')
 
-            frame.plot_ephem(hor,
-                             epoch=vals['date'], label=body,
-                             color='red')
-
+            plt.title("Complete")
             plt.tight_layout()
             plt.show()
 
+        # End
+        return complete, self.s.get_ephem(attractor=Earth,
+                                          epoch=time_range(start=self.vals['date'] - dt,
+                                                           end=self.vals['date'] + dt)), total_maneuvers
+
 
 if __name__ == "__main__":
-    Plotter.plot_timed("2006 WB",
-                       Time.now().strftime("%Y-%m-%d 00:00:00"),
-                       (Time.now() + TimeDelta(1 * u.year)).strftime("%Y-%m-%d 00:00:00"),
-                       0.5 * u.day,
-                       show=True)
+    bodies = ['2021 WA5', '2022 YO1', '2007 XB23', '2024 UU3', '2024 PT5', '2020 XR']
+
+    for body in bodies:
+        p = Plotter(body="body", location="500@399", start_epoch=Time.now(),
+                    stop_epoch=Time.now() + 2 * u.year, delta=2 * u.day)
+
+        _, _, mans = p.animate_timed(r1=200 * 1000, plot=True)
+
+        print(mans.get_total_cost())
+        print(mans.get_total_time())

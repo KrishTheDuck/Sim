@@ -47,22 +47,18 @@ class Mechanics:
         :param a: Semi-major axis
         :return: Total time for the transfer
         """
+        E1 = 2 * math.atan(math.sqrt((1 - e) / (1 + e)) * math.tan(n1 / 2))
+        E2 = 2 * math.atan(math.sqrt((1 - e) / (1 + e)) * math.tan(n2 / 2))
+        n = math.sqrt(Earth.k.value / a ** 3)  # mean motion
 
-        E1 = math.atan(math.sin(n1) * math.sqrt(1 - e * e) / (math.cos(n1) + e))
-        M1 = E1 - e * math.sin(E1)
-
-        E2 = math.atan(math.sin(n2) * math.sqrt(1 - e * e) / (math.cos(n2) + e))
-        M2 = E2 - e * math.sin(E2)
-
-        print(M1, M2, " n1,n2 ", n1, n2)
-
-        # T^2 = pi a b sqrt(2/u * (1/r1 + 1/r2)
-        return abs(2 * math.sqrt(pow(a, 3) / Earth.k.value) * np.radians(n2 - n1))
+        return (E2 - E1 - e * (math.sin(E2) - math.sin(E1))) / n
 
     @staticmethod
     def elliptical_period(a: float, e: float, r1: float, r2: float):
+        nu1 = math.acos(round((a * (1 - e ** 2) - r1) / (e * r1), 5))
+        nu2 = math.acos(round((a * (1 - e ** 2) - r2) / (e * r2), 5))
         b = a * math.sqrt(1 - e ** 2)
-        return 0.5 * math.pi * a * b * math.sqrt((2 / Earth.k.value) * (1 / r1 + 1 / r2))
+        return abs(Mechanics.elliptic_period(a, e, nu1, nu2))
 
     @staticmethod
     def vel_from_orbit(orb: Orbit, nu: float):
@@ -98,10 +94,10 @@ class Mechanics:
         """
 
         # get norm
-        dir_norm = norm(direction)
-        unit_r = [-x / dir_norm for x in direction]
+        dir_norm = norm(direction).value
+        unit_r = [-x.value / dir_norm for x in direction]
 
-        return [(mag * x).value for x in unit_r]
+        return [(mag * x) for x in unit_r]
 
     @staticmethod
     def __cross(A: np.ndarray, B: np.ndarray) -> np.ndarray:

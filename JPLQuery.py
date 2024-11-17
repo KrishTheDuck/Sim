@@ -1,4 +1,5 @@
 from datetime import datetime
+from retrying import retry
 
 import astropy.units as u
 import requests
@@ -70,15 +71,21 @@ class JPLQuery:
             'dist': float(min_dist) * 149597870.691  # to km
         }
 
+    @staticmethod
+    @retry(stop_max_attempt_number=3, wait_fixed=2000)
+    def fetch_data(url, params):
+        response = requests.get(url, params=params)
+        return response
+
     def __get_approx_closest_approach(self):
         # first approximate with neo
         url = f"https://api.nasa.gov/neo/rest/v1/neo/search"
         API_KEY = 'GNz3AbIFpuHowxAXIhCn3kJHipRrt7EHyCBtWpfh'
 
         # Query the api to get the neo id of the asteroid
-        response = requests.get(url, params={"api_key": API_KEY, "name": self.asteroid_name, "size": 1})
+        response = JPLQuery.fetch_data(url, params={"api_key": API_KEY, "name": self.asteroid_name, "size": 1})
         if response.status_code != 200:
-            exit("Error fetching data from NEO!")
+            exit(f"Error fetching data from NEO! {response.text}")
 
         data = response.json()
         neo_id = data['near_earth_objects'][0]['designation']
