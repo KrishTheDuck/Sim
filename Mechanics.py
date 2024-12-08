@@ -95,7 +95,7 @@ class Mechanics:
 
         # get norm
         dir_norm = norm(direction).value
-        unit_r = [-x.value / dir_norm for x in direction]
+        unit_r = [x.value / dir_norm for x in direction]
 
         return [(mag * x) for x in unit_r]
 
@@ -107,12 +107,12 @@ class Mechanics:
         return np.array([C_x, C_y, C_z])
 
     @staticmethod
-    def orbital_elements(r, v, mu=398600.4418):  # mu is Earth's gravitational parameter in km^3/s^2
+    def orbital_elements(r, v):
+        mu = Earth.k.to_value(u.km ** 3 / u.s ** 2)  # mu is Earth's gravitational parameter in km^3/s^2
         r = np.array(r)
-        v = np.array(v)
-
-        # Magnitude of position and velocity
         r_norm = np.linalg.norm(r)
+
+        v = np.array(v)
         v_norm = np.linalg.norm(v)
 
         # Angular momentum vector
@@ -127,7 +127,7 @@ class Mechanics:
         n_norm = np.linalg.norm(n)
 
         # Eccentricity vector
-        e = ((v_norm ** 2 - mu / r_norm) * r - np.dot(r, v) * v) / mu
+        e = Mechanics.__cross(v, h) / mu - r / r_norm
         ecc = np.linalg.norm(e)
 
         # Right Ascension of the Ascending Node (RAAN)
@@ -153,7 +153,7 @@ class Mechanics:
             true_anomaly = np.arccos(np.dot(n, r) / (n_norm * r_norm))
             true_anomaly = 2 * np.pi - true_anomaly if cp[2] < 0 else true_anomaly
 
-        # Semi-major axis
+        # orbital energy:
         a = 1 / (2 / r_norm - v_norm ** 2 / mu)
 
         # Period (for elliptical orbits)
