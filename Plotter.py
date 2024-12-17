@@ -167,7 +167,7 @@ if __name__ == "__main__":
 
             p.plot(ols[m_index],
                    f"Transfers for {body}, Total Cost: {costs[m_index]:.3} km/s, Total Time: {times[m_index]:.3} days",
-                   [f'Initial Orbit {m_index + 50} 1e3 km', 'Rendezvous Orbit', 'Return Orbit After Shooting Ion Plume',
+                   [f'Initial Orbit {m_index + 100} 1e3 km', 'Rendezvous Orbit', 'Return Orbit After Shooting Ion Plume',
                     'Corrective Orbit Back to Initial'])
 
             fig, ax1 = plt.subplots()
