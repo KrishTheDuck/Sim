@@ -21,21 +21,33 @@ class Plotter:
     __ephemerides_search_range = 1 * u.day
 
     def __init__(self, body, location, start_epoch, stop_epoch):
+        """
+        Construct for the Plotter class
+
+        :param body: asteroid name
+        :param location: location plot around
+        :param start_epoch: beginning of the time sweep
+        :param stop_epoch: end of the time sweep
+        """
         self.body = body
         self.location = location
 
+        # generate the JPLQuery object
         self.s = JPLQuery(self.body, self.location, {
             'start': start_epoch.strftime("%Y-%m-%d 00:00:00"),
             'stop': stop_epoch.strftime("%Y-%m-%d 00:00:00"),
             'step': '1d'
         })
 
+        # Generate the closest approach values
         self.vals = self.s.zoom_to_closest_approach()
 
+        # Get the Ephemerides object
         self.hor = self.s.get_ephem(attractor=Earth,
                                     epoch=time_range(start=self.vals['date'] - Plotter.__ephemerides_search_range,
                                                      end=self.vals['date'] + Plotter.__ephemerides_search_range))
 
+        # Get the ephemerides
         self.ephemerides = self.s.get_orbital_elements(
             epochs_time_range=time_range(start=self.vals['date'] - Plotter.__ephemerides_search_range,
                                          end=self.vals['date'] + Plotter.__ephemerides_search_range),
@@ -44,6 +56,17 @@ class Plotter:
     @staticmethod
     def generate_orbit(ephemerides: dict, EPOCH: astropy.time.Time, r_min: float, r_max: float,
                        plane: hapsira.frames.Planes, true_anomaly: float):
+        """
+        Generates an orbit given the orbital elements, the time, the minimum and maximum distance from the central body, the plane, and the true anomaly
+
+        :param ephemerides: orbital elements
+        :param EPOCH: time at which to compute
+        :param r_min: minimum distance
+        :param r_max: maximum distance
+        :param plane: plane
+        :param true_anomaly: true anomaly
+        :return: orbit object
+        """
         a = (r_min + r_max) / 2.0
         ecc = (r_max - r_min) / (r_max + r_min)
 
@@ -60,6 +83,12 @@ class Plotter:
         )
 
     def animate_timed(self, r_min=100 * 1000.0 * 1000.0 + Earth.R.to_value(u.m)):
+        """
+        Draws the orbits
+
+        :param r_min: initial radius
+        :return: list of orbits and maneuvers
+        """
         maneuvers = []
         r_max = (self.vals['dist'] * u.km).to_value(u.m)
 
@@ -115,6 +144,14 @@ class Plotter:
         return complete, total_maneuvers
 
     def plot(self, orbits, title, titles):
+        """
+        Helper function plots the orbits returned from animate timed
+
+        :param orbits: list of orbits
+        :param title: title of the plot
+        :param titles: labels for each plot
+        :return: Nothing
+        """
         frame = OrbitPlotter()
         frame.set_body_frame(Earth)
 
@@ -131,19 +168,22 @@ class Plotter:
 
 
 if __name__ == "__main__":
-
     while True:
         try:
+            # Get the asteroid name and time
             body = input("Please input an asteroid from the NEO database: ")
             time = int(input("How many years into the future to calculate: "))
 
+            # check if negative time
             if time <= 0:
                 raise "Negative time not allowed."
 
+            # calculate the trajectories
             print("Calculating...")
             p = Plotter(body=body, location="500@399", start_epoch=Time.now(),
                         stop_epoch=Time.now() + time * u.year)
 
+            # get the data from the radius sweep
             print("Generating optimal radius...")
             min_ol = None
             min_mans = None
@@ -153,6 +193,7 @@ if __name__ == "__main__":
             mss = []
 
             for j in range(50, 200):
+                # Simulate trajectory or each radius, and get the data
                 ol, mans = p.animate_timed(r_min=j * 1000 * 1000)
                 mss.append([norm(m[1]).to_value(u.km / u.s) for m in mans])
 
@@ -165,11 +206,14 @@ if __name__ == "__main__":
 
             print("Found. Plotting...")
 
+            # plot the result
             p.plot(ols[m_index],
                    f"Transfers for {body}, Total Cost: {costs[m_index]:.3} km/s, Total Time: {times[m_index]:.3} days",
-                   [f'Initial Orbit {m_index + 100} 1e3 km', 'Rendezvous Orbit', 'Return Orbit After Shooting Ion Plume',
+                   [f'Initial Orbit {m_index + 100} 1e3 km', 'Rendezvous Orbit',
+                    'Return Orbit After Shooting Ion Plume',
                     'Corrective Orbit Back to Initial'])
 
+            # get the figures, and axes
             fig, ax1 = plt.subplots()
             ax2 = ax1.twinx()
 
@@ -189,9 +233,11 @@ if __name__ == "__main__":
 
             plt.show()
         except BaseException as e:
+            # check if anything has been raised and handle it neatly
             print("Please try again.")
             print(f"Error: {e}")
 
+        # exit condition
         if input("Continue...('N' to exit)") == 'N':
             print("goodbye!")
             break

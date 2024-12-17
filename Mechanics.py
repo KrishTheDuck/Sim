@@ -15,12 +15,13 @@ class Mechanics:
     @staticmethod
     def hyperbolic_period(a: float, e: float, n1: float, n2: float) -> float:
         """
+        Computes the period of a hyperbolic orbit.
 
-        :param a:
-        :param e:
-        :param n1:
-        :param n2:
-        :return:
+        :param a: semi-major axis
+        :param e: eccentricity
+        :param n1: initial true anomaly
+        :param n2: final true anomaly
+        :return: the time elapsed
         """
         if n2 < n1:
             n1, n2 = n2, n1
@@ -44,7 +45,7 @@ class Mechanics:
         :param n1: Initial true anomaly
         :param e: Eccentricity
         :param a: Semi-major axis
-        :return: Total time for the transfer
+        :return: Total time elapsed
         """
         E1 = 2 * math.atan(math.sqrt((1 - e) / (1 + e)) * math.tan(n1 / 2))
         E2 = 2 * math.atan(math.sqrt((1 - e) / (1 + e)) * math.tan(n2 / 2))
@@ -54,6 +55,14 @@ class Mechanics:
 
     @staticmethod
     def elliptical_period(a: float, e: float, r1: float, r2: float):
+        """
+        Calculates the elliptical period from position 1 to 2
+        :param a: semi-major axis
+        :param e: eccentricity
+        :param r1: position 1
+        :param r2: position 2
+        :return: Total time elapsed
+        """
         nu1 = math.acos(round((a * (1 - e ** 2) - r1) / (e * r1), 5))
         nu2 = math.acos(round((a * (1 - e ** 2) - r2) / (e * r2), 5))
         b = a * math.sqrt(1 - e ** 2)
@@ -61,6 +70,12 @@ class Mechanics:
 
     @staticmethod
     def vel_from_orbit(orb: Orbit, nu: float):
+        """
+        Velocity at a position given an orbit and a true anomaly.
+        :param orb: orbit
+        :param nu: true anomaly
+        :return: velocity
+        """
         r, v = orb.rv()
         r = r.to(u.m)
         v = v.to(u.m / u.s)
@@ -98,6 +113,7 @@ class Mechanics:
 
         return [(mag * x) for x in unit_r]
 
+    # helper function computes the cross product
     @staticmethod
     def __cross(A: np.ndarray, B: np.ndarray) -> np.ndarray:
         C_x = A[1] * B[2] - A[2] * B[1]
@@ -107,52 +123,58 @@ class Mechanics:
 
     @staticmethod
     def orbital_elements(r, v):
+        # G*M for the Earth
         mu = Earth.k.to_value(u.km ** 3 / u.s ** 2)
+
+        # Position vector:
         r = np.array(r)
         r_norm = np.linalg.norm(r)
 
+        # Velocity vector:
         v = np.array(v)
         v_norm = np.linalg.norm(v)
 
-        # Angular momentum vector
+        # Angular momentum vector:
         h = Mechanics.__cross(r, v)
         h_norm = np.linalg.norm(h)
 
-        # Inclination
+        # Inclination:
         inc = np.arccos(h[2] / h_norm)
 
-        # Node vector
+        # Node vector:
         n = Mechanics.__cross(np.array([0, 0, 1]), h)
         n_norm = np.linalg.norm(n)
 
-        # Eccentricity vector
+        # Eccentricity vector:
         e = Mechanics.__cross(v, h) / mu - r / r_norm
         ecc = np.linalg.norm(e)
 
-        # Right Ascension of the Ascending Node (RAAN)
-        if n_norm > 1e-10:  # Avoid division by zero
+        # Right Ascension of the Ascending Node (RAAN):
+        if n_norm > 1e-10:
             raan = np.arccos(n[0] / n_norm)
             raan = 2 * np.pi - raan if n[1] < 0 else raan
         else:
             raan = 0.0
 
-        # Argument of Periapsis
+        # Argument of Periapsis:
         if n_norm > 1e-10 and ecc > 1e-10:
             arg_pe = np.arccos(np.dot(n, e) / (n_norm * ecc))
             arg_pe = 2 * np.pi - arg_pe if e[2] < 0 else arg_pe
         else:
             arg_pe = 0.0
 
-        # True Anomaly
+        # True Anomaly:
         if ecc > 1e-10:
             true_anomaly = np.arccos(np.dot(e, r) / (ecc * r_norm))
+            # Wrap Result
             true_anomaly = 2 * np.pi - true_anomaly if np.dot(r, v) < 0 else true_anomaly
         else:
-            cp = Mechanics.__cross(n, r)
+            # Calculate the orientation of the orbit
+            perp = Mechanics.__cross(n, r)
             true_anomaly = np.arccos(np.dot(n, r) / (n_norm * r_norm))
-            true_anomaly = 2 * np.pi - true_anomaly if cp[2] < 0 else true_anomaly
+            true_anomaly = 2 * np.pi - true_anomaly if perp[2] < 0 else true_anomaly
 
-        # orbital energy:
+        # Orbital Energy:
         a = 1 / (2 / r_norm - v_norm ** 2 / mu)
 
         # Period (for elliptical orbits)
