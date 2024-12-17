@@ -185,6 +185,7 @@ if __name__ == "__main__":
 
             plt.title("Maneuver Cost and Total Time per Initial Radius")
             ax1.legend()
+            ax2.legend()
 
             plt.show()
         except BaseException as e:
