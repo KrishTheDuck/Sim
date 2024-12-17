@@ -106,56 +106,13 @@ class Plotter:
         maneuvers.append(Maneuver((return_time,
                                    (u.m / u.s) * Mechanics.vec_in_dir(-dv, dv_vector))))
 
-        print(maneuvers)
         # End
         # Coalesce the maneuvers
         total_maneuvers = Maneuver(*[(m[0], m[1]) for man in maneuvers for m in man])
 
-        complete = [orb0]+ orb0.apply_maneuver(total_maneuvers, intermediate=True)
+        complete = [orb0] + orb0.apply_maneuver(total_maneuvers, intermediate=True)
 
-        return complete, self.s.get_ephem(attractor=Earth,
-                                          epoch=time_range(
-                                              start=self.vals['date'] - dt,
-                                              end=self.vals['date'] + dt)), total_maneuvers
-
-    def orbits(self, r_min=200 * 1000 * 1000):
-        r_max = (self.vals['dist'] * u.km).to_value(u.m)
-        a = (r_min + r_max) / 2.0
-        ecc = (r_max - r_min) / (r_min + r_max)
-        orbits = []
-
-        # Region: initial orbit
-        dt = TimeDelta(Mechanics.elliptical_period(a, ecc, r_min, r_max) * u.s)
-
-        orbits.append(Plotter.generate_orbit(self.ephemerides, self.vals['date'] - dt,
-                                             r_min, r_min, self.hor.plane, 0))
-        r = orbits[0].r.to(u.m)
-        v = orbits[0].v.to(u.m / u.s)
-        # End
-        # Region: Second Orbit
-        orbits.append(Plotter.generate_orbit(self.ephemerides, self.vals['date'] - dt,
-                                             r_min, r_max, self.hor.plane, 0))
-        # End
-        # Region: Return orbit
-        dv = abs(Mechanics.vel(r_min, r_min) - Mechanics.vel(a, r_max))
-
-        v_ellipse = Mechanics.vec_in_dir(Mechanics.vel(a, r_max), -v) * (u.m / u.s)
-        v_radial = Mechanics.vec_in_dir(dv, r) * (u.m / u.s)
-        position = Mechanics.vec_in_dir(r_max, -r) * u.m
-
-        orbits.append((orb := Orbit.from_vectors(r=position, v=(v_ellipse + v_radial).to(u.km / u.s),
-                                                 epoch=self.vals['date'], plane=self.hor.plane,
-                                                 attractor=Earth))
-                      .propagate_to_anomaly(orb.nu + np.pi * u.rad))
-
-        # End
-        # Region: adj
-        orbits.append(Plotter.generate_orbit(self.ephemerides, orbits[-1].epoch,
-                                             r_min, r_min, self.hor.plane, 0)
-                      .propagate(orbits[0].period / 2))
-        # End
-        # ! plot
-        return orbits
+        return complete, total_maneuvers
 
     def plot(self, orbits, title, titles):
         frame = OrbitPlotter()
@@ -167,23 +124,73 @@ class Plotter:
 
         frame.plot_ephem(self.hor, epoch=self.vals['date'],
                          label=f'{self.body}', color='red')
+
         plt.title(title)
         plt.tight_layout()
         plt.show()
 
 
 if __name__ == "__main__":
-    bodies = ['2021 WA5', '2022 YO1', '2007 XB23', '2024 UU3', '2024 PT5', '2020 XR']
 
-    for i, body in enumerate(bodies):
-        p = Plotter(body=body, location="500@399", start_epoch=Time.now(),
-                    stop_epoch=Time.now() + 2 * u.year)
+    while True:
+        try:
+            body = input("Please input an asteroid from the NEO database: ")
+            time = int(input("How many years into the future to calculate: "))
 
-        ol, _, mans = p.animate_timed(r_min=200 * 1000 * 1000)
-        print(len(ol))
-        time = mans.get_total_time().to_value(u.day)
-        cost = mans.get_total_cost().to_value(u.km / u.s)
+            if time <= 0:
+                raise "Negative time not allowed."
 
-        p.plot(ol, f"{body}, cost: {cost:.3} km/s, time: {time:.3} days",
-               ['Initial Orbit', 'Rendezvous Orbit', 'Return Orbit After Shooting Ion Plume',
-                'Corrective Orbit Back to Initial'])
+            print("Calculating...")
+            p = Plotter(body=body, location="500@399", start_epoch=Time.now(),
+                        stop_epoch=Time.now() + time * u.year)
+
+            print("Generating optimal radius...")
+            min_ol = None
+            min_mans = None
+            times = []
+            costs = []
+            ols = []
+            mss = []
+
+            for j in range(50, 200):
+                ol, mans = p.animate_timed(r_min=j * 1000 * 1000)
+                mss.append([norm(m[1]).to_value(u.km / u.s) for m in mans])
+
+                ols.append(ol)
+                times.append(mans.get_total_time().to_value(u.day))
+                costs.append(mans.get_total_cost().to_value(u.km / u.s))
+
+            # get min cost
+            m_index = min(range(len(costs)), key=lambda index: 0.6 * costs[index] + 0.4 * times[index])
+
+            print("Found. Plotting...")
+
+            p.plot(ols[m_index],
+                   f"Transfers for {body}, Total Cost: {costs[m_index]:.3} km/s, Total Time: {times[m_index]:.3} days",
+                   [f'Initial Orbit {m_index + 50} 1e3 km', 'Rendezvous Orbit', 'Return Orbit After Shooting Ion Plume',
+                    'Corrective Orbit Back to Initial'])
+
+            fig, ax1 = plt.subplots()
+            ax2 = ax1.twinx()
+
+            x_range = range(100, 100 + len(mss))
+            ax1.plot(x_range, [sublist[0] for sublist in mss], color='red', label='V1')
+            ax1.plot(x_range, [sublist[1] for sublist in mss], color='blue', label='V2')
+            ax1.plot(x_range, [sublist[2] for sublist in mss], color='green', label='V3')
+            ax1.set_xlabel("Initial Radius (1e3 km)")
+            ax1.set_ylabel("Cost (km/s)")
+
+            ax2.plot(x_range, times, color='orange', label='Total Mission Time')
+            ax2.set_ylabel("Time (days)")
+
+            plt.title("Maneuver Cost and Total Time per Initial Radius")
+            ax1.legend()
+
+            plt.show()
+        except BaseException as e:
+            print("Please try again.")
+            print(f"Error: {e}")
+
+        if input("Continue...('N' to exit)") == 'N':
+            print("goodbye!")
+            break

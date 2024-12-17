@@ -1,4 +1,6 @@
 from datetime import datetime
+from webbrowser import Error
+
 from retrying import retry
 
 import astropy.units as u
@@ -80,29 +82,33 @@ class JPLQuery:
     def __get_approx_closest_approach(self):
         # first approximate with neo
         url = f"https://api.nasa.gov/neo/rest/v1/neo/search"
-        API_KEY = 'GNz3AbIFpuHowxAXIhCn3kJHipRrt7EHyCBtWpfh'
+        # personal api key
+        # API_KEY = 'GNz3AbIFpuHowxAXIhCn3kJHipRrt7EHyCBtWpfh'
+        API_KEY = 'DEMO_KEY'
 
         # Query the api to get the neo id of the asteroid
         response = JPLQuery.fetch_data(url, params={"api_key": API_KEY, "name": self.asteroid_name, "size": 1})
         if response.status_code != 200:
-            exit(f"Error fetching data from NEO! {response.text}")
+            print(f"Error fetching data from NEO! {response.text}")
+            raise Error
 
         data = response.json()
         neo_id = data['near_earth_objects'][0]['designation']
 
         # get the actual information with the asteroid id
-        url = f"https://ssd-api.jpl.nasa.gov/cad.api?des={neo_id}&date-min={self.hor.epochs['start']}&date-max={self.hor.epochs['stop']}&dist-max=0.2"
+        url = f"https://ssd-api.jpl.nasa.gov/cad.api?des={neo_id}&date-min={self.hor.epochs['start']}&date-max={self.hor.epochs['stop']}"
+        # url = f"https://api.nasa.gov/neo/rest/v1/neo/{neo_id}?api_key={API_KEY}"
         response = requests.get(url)
         data = response.json()
 
-        if data['count'] == 0:
-            exit(f"Request for information on body {self.asteroid_name} not found.")
+        if len(data) == 0:
+            print(f"Request for information on body {self.asteroid_name} with id {neo_id} not found.")
+            raise Error
 
         # get the closest approach data
         closest = min(data['data'], key=lambda x: float(x[4]))
         return {
-            'date': closest[3],
-            'distance_au': float(closest[4])
+            'date': closest[3]
         }
 
     def get_orbital_elements(self, epochs_time_range, EPOCH):

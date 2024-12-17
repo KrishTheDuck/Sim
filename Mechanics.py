@@ -1,9 +1,8 @@
 import math
 
 import astropy
-import numpy as np
 import astropy.units as u
-from astropy.units import Quantity
+import numpy as np
 from hapsira.bodies import Earth
 from hapsira.twobody import Orbit
 from hapsira.util import norm
@@ -108,7 +107,7 @@ class Mechanics:
 
     @staticmethod
     def orbital_elements(r, v):
-        mu = Earth.k.to_value(u.km ** 3 / u.s ** 2)  # mu is Earth's gravitational parameter in km^3/s^2
+        mu = Earth.k.to_value(u.km ** 3 / u.s ** 2)
         r = np.array(r)
         r_norm = np.linalg.norm(r)
 
